@@ -2,14 +2,11 @@ package main
 
 import (
 	"fmt"
-	"github.com/KEINOS/go-noise"
 	"github.com/veandco/go-sdl2/sdl"
 	"math"
 	"math/rand"
 	"runtime"
 )
-
-var renderer *sdl.Renderer
 
 const (
 	WindowWidth   = 1000
@@ -24,10 +21,15 @@ const (
 	BurningStage3 = 6
 )
 
+var renderer *sdl.Renderer
 var forestMap [][]int32
 var windDirectionDegreesMin int32
 var windDirectionDegreesMax int32
+
+var treeProbability float32 = 0.3
 var windSpreadProbability float32 = 0.5
+var limitThunderToCenter = true
+var fullCircleWind = true
 
 func setupSDL(loop func()) {
 	runtime.LockOSThread()
@@ -68,11 +70,7 @@ func setupSDL(loop func()) {
 					case sdl.K_r:
 						newForest()
 					case sdl.K_t:
-						x, y := getRandomTile()
-						for forestMap[x][y] != Tree {
-							x, y = getRandomTile()
-						}
-						forestMap[x][y] = Fire
+						strikeThunder()
 					}
 				}
 			}
@@ -116,50 +114,44 @@ func drawTile(x, y int32, tileType int32) {
 	renderer.FillRect(&rect)
 }
 
-//goland:noinspection GoUnusedFunction
-func generateTreesNoiseWithRandom() {
-	forestMap = make([][]int32, WindowWidth/TileSize)
-	for x := int32(0); x < WindowWidth/TileSize; x++ {
-		forestMap[x] = make([]int32, WindowHeight/TileSize)
+func strikeThunder() {
+	x, y := getRandomTile()
+	for forestMap[x][y] != Tree ||
+		(limitThunderToCenter && (!inRange(x, WindowWidth/TileSize/2-10, WindowWidth/TileSize/2+50) ||
+			!inRange(y, WindowHeight/TileSize/2-50, WindowHeight/TileSize/2+10))) {
+		x, y = getRandomTile()
 	}
-
-	for pass := 0; pass < 5; pass++ {
-		n, err := noise.New(noise.OpenSimplex, int64(pass)+rand.Int63())
-		if err != nil {
-			panic(err)
-		}
-		for x := int32(0); x < WindowWidth/TileSize; x++ {
-			for y := int32(0); y < WindowHeight/TileSize; y++ {
-				noiseValue := (n.Eval64(float64(x)/10, float64(y)/10) + 1) / 2
-				if rand.Intn(100) < 4 || noiseValue > 0.75 {
-					forestMap[x][y] = Tree
-				}
-			}
-		}
-	}
+	forestMap[x][y] = Fire
 }
 
-//goland:noinspection GoUnusedFunction
 func generateTreesRandom() {
 	forestMap = make([][]int32, WindowWidth/TileSize)
 	for x := int32(0); x < WindowWidth/TileSize; x++ {
 		forestMap[x] = make([]int32, WindowHeight/TileSize)
 	}
 
-	for x := int32(0); x < WindowWidth/TileSize; x++ {
-		for y := int32(0); y < WindowHeight/TileSize; y++ {
-			if rand.Intn(100) < 30 {
-				forestMap[x][y] = Tree
-			}
+	maxTrees := WindowWidth * WindowHeight / (TileSize * TileSize)
+	requiredTrees := int32(float32(maxTrees) * treeProbability)
+
+	for i := int32(0); i < requiredTrees; i++ {
+		x, y := getRandomTile()
+		for forestMap[x][y] != EmptyTile {
+			x, y = getRandomTile()
 		}
+		forestMap[x][y] = Tree
 	}
 }
 
 func newForest() {
 	generateTreesRandom()
-	// generateTreesNoiseWithRandom()
-	windDirectionDegreesMin = rand.Int31n(360)
-	windDirectionDegreesMax = windDirectionDegreesMin + randomMinMax(60, 120)*int32(rand.Intn(2)*2-1)
+
+	if fullCircleWind {
+		windDirectionDegreesMin = 0
+		windDirectionDegreesMax = 360
+	} else {
+		windDirectionDegreesMin = rand.Int31n(360)
+		windDirectionDegreesMax = windDirectionDegreesMin + randomMinMax(60, 120)*int32(rand.Intn(2)*2-1)
+	}
 }
 
 func getRandomTile() (int32, int32) {
@@ -247,4 +239,8 @@ func toRGB(hex string) (uint8, uint8, uint8) {
 		panic(err)
 	}
 	return r, g, b
+}
+
+func inRange(x, min, max int32) bool {
+	return x >= min && x <= max
 }
