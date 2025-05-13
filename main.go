@@ -28,7 +28,6 @@ var forestMap [][]int32
 var windDirectionDegreesMin int32
 var windDirectionDegreesMax int32
 var windSpreadProbability float32 = 0.5
-var windDelayFrames int32 = 1
 
 func setupSDL(loop func()) {
 	runtime.LockOSThread()
@@ -67,7 +66,7 @@ func setupSDL(loop func()) {
 					case sdl.K_q:
 						running = false
 					case sdl.K_r:
-						generateForest()
+						newForest()
 					case sdl.K_t:
 						x, y := getRandomTile()
 						for forestMap[x][y] != Tree {
@@ -88,15 +87,6 @@ func setupSDL(loop func()) {
 
 		sdl.Delay(16)
 	}
-}
-
-func toRGB(hex string) (uint8, uint8, uint8) {
-	var r, g, b uint8
-	_, err := fmt.Sscanf(hex, "#%02x%02x%02x", &r, &g, &b)
-	if err != nil {
-		panic(err)
-	}
-	return r, g, b
 }
 
 func setDrawColorHex(hex string) {
@@ -126,7 +116,8 @@ func drawTile(x, y int32, tileType int32) {
 	renderer.FillRect(&rect)
 }
 
-func generateForestNoiseWithRandom() {
+//goland:noinspection GoUnusedFunction
+func generateTreesNoiseWithRandom() {
 	forestMap = make([][]int32, WindowWidth/TileSize)
 	for x := int32(0); x < WindowWidth/TileSize; x++ {
 		forestMap[x] = make([]int32, WindowHeight/TileSize)
@@ -148,7 +139,8 @@ func generateForestNoiseWithRandom() {
 	}
 }
 
-func generateForestRandom() {
+//goland:noinspection GoUnusedFunction
+func generateTreesRandom() {
 	forestMap = make([][]int32, WindowWidth/TileSize)
 	for x := int32(0); x < WindowWidth/TileSize; x++ {
 		forestMap[x] = make([]int32, WindowHeight/TileSize)
@@ -163,11 +155,11 @@ func generateForestRandom() {
 	}
 }
 
-func generateForest() {
-	generateForestRandom()
-	// generateForestNoiseWithRandom()
+func newForest() {
+	generateTreesRandom()
+	// generateTreesNoiseWithRandom()
 	windDirectionDegreesMin = rand.Int31n(360)
-	windDirectionDegreesMax = windDirectionDegreesMin + randomMinMax(30, 90)*int32(rand.Intn(2)*2-1)
+	windDirectionDegreesMax = windDirectionDegreesMin + randomMinMax(60, 120)*int32(rand.Intn(2)*2-1)
 }
 
 func getRandomTile() (int32, int32) {
@@ -176,65 +168,68 @@ func getRandomTile() (int32, int32) {
 	return x, y
 }
 
+func simulateDirectSpread(x, y int32) {
+	switch forestMap[x][y] {
+	case Fire:
+		if x > 0 && forestMap[x-1][y] == Tree {
+			forestMap[x-1][y] = Fire
+		}
+		if x < WindowWidth/TileSize-1 && forestMap[x+1][y] == Tree {
+			forestMap[x+1][y] = Fire
+		}
+		if y > 0 && forestMap[x][y-1] == Tree {
+			forestMap[x][y-1] = Fire
+		}
+		if y < WindowHeight/TileSize-1 && forestMap[x][y+1] == Tree {
+			forestMap[x][y+1] = Fire
+		}
+
+		forestMap[x][y] = BurningStage1
+	case BurningStage1:
+		forestMap[x][y] = BurningStage2
+	case BurningStage2:
+		forestMap[x][y] = BurningStage3
+	case BurningStage3:
+		forestMap[x][y] = BurnedTree
+	}
+}
+
+func simulateWInd(x, y int32) {
+	if Fire <= forestMap[x][y] && forestMap[x][y] <= BurningStage3 {
+		for i := 1; i <= 5; i++ {
+			windDirectionDegrees := windDirectionDegreesMin + randomMinMax(0, int32(math.Abs(float64(windDirectionDegreesMax-windDirectionDegreesMin))))
+			windDirectionRadians := toRadians(windDirectionDegrees)
+			windX := int32(float64(TileSize) * math.Cos(windDirectionRadians))
+			windY := int32(float64(TileSize) * math.Sin(windDirectionRadians))
+
+			if x+windX >= 0 && x+windX < WindowWidth/TileSize && y+windY >= 0 && y+windY < WindowHeight/TileSize {
+				if forestMap[x+windX][y+windY] == Tree {
+					if rand.Float32() < windSpreadProbability {
+						forestMap[x+windX][y+windY] = Fire
+					}
+				}
+			}
+		}
+	}
+}
+
 func main() {
 	println("Shortcuts:" +
 		"\n- Press 'Q' to quit the simulation." +
 		"\n- Press 'R' to regenerate the forest." +
 		"\n- Press 'T' to strike a thunderbolt on a random tree.")
-	generateForest()
-	windCounter := int32(0)
-	setupSDL(func() {
+	newForest()
+	mainLoop := func() {
 		for x := int32(0); x < WindowWidth/TileSize; x++ {
 			for y := int32(0); y < WindowHeight/TileSize; y++ {
 				drawTile(x, y, forestMap[x][y])
 
-				switch forestMap[x][y] {
-				case Fire:
-					if x > 0 && forestMap[x-1][y] == Tree {
-						forestMap[x-1][y] = Fire
-					}
-					if x < WindowWidth/TileSize-1 && forestMap[x+1][y] == Tree {
-						forestMap[x+1][y] = Fire
-					}
-					if y > 0 && forestMap[x][y-1] == Tree {
-						forestMap[x][y-1] = Fire
-					}
-					if y < WindowHeight/TileSize-1 && forestMap[x][y+1] == Tree {
-						forestMap[x][y+1] = Fire
-					}
-
-					forestMap[x][y] = BurningStage1
-				case BurningStage1:
-					forestMap[x][y] = BurningStage2
-				case BurningStage2:
-					forestMap[x][y] = BurningStage3
-				case BurningStage3:
-					forestMap[x][y] = BurnedTree
-				}
-
-				if forestMap[x][y] == Fire || forestMap[x][y] == BurningStage1 {
-					if windCounter == windDelayFrames {
-						for i := 1; i <= 5; i++ {
-							windDirectionDegrees := windDirectionDegreesMin + randomMinMax(0, int32(math.Abs(float64(windDirectionDegreesMax-windDirectionDegreesMin))))
-							windDirectionRadians := toRadians(windDirectionDegrees)
-							windX := int32(float64(TileSize) * math.Cos(windDirectionRadians))
-							windY := int32(float64(TileSize) * math.Sin(windDirectionRadians))
-
-							if x+windX >= 0 && x+windX < WindowWidth/TileSize && y+windY >= 0 && y+windY < WindowHeight/TileSize {
-								if forestMap[x+windX][y+windY] == Tree {
-									if rand.Float32() < windSpreadProbability {
-										forestMap[x+windX][y+windY] = Fire
-									}
-								}
-							}
-						}
-						windCounter = 0
-					}
-					windCounter++
-				}
+				simulateDirectSpread(x, y)
+				simulateWInd(x, y)
 			}
 		}
-	})
+	}
+	setupSDL(mainLoop)
 }
 
 func randomMinMax(min, max int32) int32 {
@@ -243,4 +238,13 @@ func randomMinMax(min, max int32) int32 {
 
 func toRadians(degrees int32) float64 {
 	return float64(degrees) * (math.Pi / 180)
+}
+
+func toRGB(hex string) (uint8, uint8, uint8) {
+	var r, g, b uint8
+	_, err := fmt.Sscanf(hex, "#%02x%02x%02x", &r, &g, &b)
+	if err != nil {
+		panic(err)
+	}
+	return r, g, b
 }
