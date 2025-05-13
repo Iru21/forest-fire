@@ -117,8 +117,8 @@ func drawTile(x, y int32, tileType int32) {
 func strikeThunder() {
 	x, y := getRandomTile()
 	for forestMap[x][y] != Tree ||
-		(limitThunderToCenter && (!inRange(x, WindowWidth/TileSize/2-10, WindowWidth/TileSize/2+50) ||
-			!inRange(y, WindowHeight/TileSize/2-50, WindowHeight/TileSize/2+10))) {
+		(limitThunderToCenter && (!inRange(x, WindowWidth/TileSize/2-50, WindowWidth/TileSize/2+50) ||
+			!inRange(y, WindowHeight/TileSize/2-50, WindowHeight/TileSize/2+50))) {
 		x, y = getRandomTile()
 	}
 	forestMap[x][y] = Fire
