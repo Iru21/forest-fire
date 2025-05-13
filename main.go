@@ -194,7 +194,7 @@ func simulateDirectSpread(x, y int32) {
 	}
 }
 
-func simulateWInd(x, y int32) {
+func simulateWind(x, y int32) {
 	if Fire <= forestMap[x][y] && forestMap[x][y] <= BurningStage3 {
 		for i := 1; i <= 5; i++ {
 			windDirectionDegrees := windDirectionDegreesMin + randomMinMax(0, int32(math.Abs(float64(windDirectionDegreesMax-windDirectionDegreesMin))))
@@ -225,7 +225,7 @@ func main() {
 				drawTile(x, y, forestMap[x][y])
 
 				simulateDirectSpread(x, y)
-				simulateWInd(x, y)
+				simulateWind(x, y)
 			}
 		}
 	}
