@@ -6,12 +6,15 @@ import (
 	"math"
 	"math/rand"
 	"runtime"
+	"sync"
 )
 
 const (
-	WindowWidth   = 1000
-	WindowHeight  = 800
-	TileSize      = 6
+	WindowWidth  = 1000
+	WindowHeight = 800
+	ChunkCount   = 16
+
+	TileSize      = 4
 	EmptyTile     = 0
 	Tree          = 1
 	BurnedTree    = 2
@@ -23,6 +26,7 @@ const (
 
 var renderer *sdl.Renderer
 var forestMap [][]int32
+var nextMap [][]int32
 var windDirectionDegreesMin int32
 var windDirectionDegreesMax int32
 
@@ -30,6 +34,41 @@ var treeProbability float32 = 0.3
 var windSpreadProbability float32 = 0.5
 var limitThunderToCenter = true
 var fullCircleWind = true
+
+type Color struct {
+	r uint8
+	g uint8
+	b uint8
+}
+
+var tileColors = map[int32]Color{
+	EmptyTile:     toRGB("#000000"),
+	Tree:          toRGB("#228B22"),
+	BurnedTree:    toRGB("#3a0a00"),
+	Fire:          toRGB("#000000"),
+	BurningStage1: toRGB("#f7b633"),
+	BurningStage2: toRGB("#b57332"),
+	BurningStage3: toRGB("#a04d23"),
+}
+
+var tileTextures map[int32]*sdl.Texture
+
+func createTileTextures() {
+	tileTextures = make(map[int32]*sdl.Texture)
+	for t, color := range tileColors {
+		surf, _ := sdl.CreateRGBSurface(0, TileSize, TileSize, 32, 0, 0, 0, 0)
+		surf.FillRect(nil, sdl.MapRGB(surf.Format, color.r, color.g, color.b))
+		tex, _ := renderer.CreateTextureFromSurface(surf)
+		tileTextures[t] = tex
+		surf.Free()
+	}
+}
+
+func drawTile(x, y int32, tileType int32) {
+	tex := tileTextures[tileType]
+	rect := sdl.Rect{X: x * TileSize, Y: y * TileSize, W: TileSize, H: TileSize}
+	renderer.Copy(tex, nil, &rect)
+}
 
 func setupSDL(loop func()) {
 	runtime.LockOSThread()
@@ -51,6 +90,8 @@ func setupSDL(loop func()) {
 		panic(err)
 	}
 	defer renderer.Destroy()
+
+	createTileTextures()
 
 	defer println("\nFinishing simulation...")
 
@@ -85,33 +126,6 @@ func setupSDL(loop func()) {
 
 		sdl.Delay(16)
 	}
-}
-
-func setDrawColorHex(hex string) {
-	r, g, b := toRGB(hex)
-	renderer.SetDrawColor(r, g, b, 255)
-}
-
-func drawTile(x, y int32, tileType int32) {
-	switch tileType {
-	case EmptyTile:
-		setDrawColorHex("#000000")
-	case Tree:
-		setDrawColorHex("#228B22")
-	case BurnedTree:
-		setDrawColorHex("#3a0a00")
-	case Fire:
-		setDrawColorHex("#f7b633")
-	case BurningStage1:
-		setDrawColorHex("#b57332")
-	case BurningStage2:
-		setDrawColorHex("#a04d23")
-	case BurningStage3:
-		setDrawColorHex("#7a2617")
-	}
-
-	rect := sdl.Rect{X: x * TileSize, Y: y * TileSize, W: TileSize, H: TileSize}
-	renderer.FillRect(&rect)
 }
 
 func strikeThunder() {
@@ -164,25 +178,25 @@ func simulateDirectSpread(x, y int32) {
 	switch forestMap[x][y] {
 	case Fire:
 		if x > 0 && forestMap[x-1][y] == Tree {
-			forestMap[x-1][y] = Fire
+			nextMap[x-1][y] = Fire
 		}
 		if x < WindowWidth/TileSize-1 && forestMap[x+1][y] == Tree {
-			forestMap[x+1][y] = Fire
+			nextMap[x+1][y] = Fire
 		}
 		if y > 0 && forestMap[x][y-1] == Tree {
-			forestMap[x][y-1] = Fire
+			nextMap[x][y-1] = Fire
 		}
 		if y < WindowHeight/TileSize-1 && forestMap[x][y+1] == Tree {
-			forestMap[x][y+1] = Fire
+			nextMap[x][y+1] = Fire
 		}
 
-		forestMap[x][y] = BurningStage1
+		nextMap[x][y] = BurningStage1
 	case BurningStage1:
-		forestMap[x][y] = BurningStage2
+		nextMap[x][y] = BurningStage2
 	case BurningStage2:
-		forestMap[x][y] = BurningStage3
+		nextMap[x][y] = BurningStage3
 	case BurningStage3:
-		forestMap[x][y] = BurnedTree
+		nextMap[x][y] = BurnedTree
 	}
 }
 
@@ -197,7 +211,7 @@ func simulateWind(x, y int32) {
 			if x+windX >= 0 && x+windX < WindowWidth/TileSize && y+windY >= 0 && y+windY < WindowHeight/TileSize {
 				if forestMap[x+windX][y+windY] == Tree {
 					if rand.Float32() < windSpreadProbability {
-						forestMap[x+windX][y+windY] = Fire
+						nextMap[x+windX][y+windY] = Fire
 					}
 				}
 			}
@@ -206,18 +220,44 @@ func simulateWind(x, y int32) {
 }
 
 func main() {
-	println("Shortcuts:" +
+	println("Keybinds:" +
 		"\n- Press 'Q' to quit the simulation." +
 		"\n- Press 'R' to regenerate the forest." +
 		"\n- Press 'T' to strike a thunderbolt on a random tree.")
+
 	newForest()
 	mainLoop := func() {
+		var wg sync.WaitGroup
+		chunkHeight := WindowHeight / TileSize / ChunkCount
+
+		nextMap = make([][]int32, len(forestMap))
+		for x := range forestMap {
+			nextMap[x] = make([]int32, len(forestMap[x]))
+			copy(nextMap[x], forestMap[x])
+		}
+
+		for i := 0; i < ChunkCount; i++ {
+			startY := int32(i * chunkHeight)
+			endY := startY + int32(chunkHeight)
+			if i == ChunkCount-1 {
+				endY = WindowHeight / TileSize
+			}
+			wg.Add(1)
+			go func(startY, endY int32) {
+				defer wg.Done()
+				for x := int32(0); x < WindowWidth/TileSize; x++ {
+					for y := startY; y < endY; y++ {
+						simulateDirectSpread(x, y)
+						simulateWind(x, y)
+					}
+				}
+			}(startY, endY)
+		}
+		wg.Wait()
+		forestMap, nextMap = nextMap, forestMap
 		for x := int32(0); x < WindowWidth/TileSize; x++ {
 			for y := int32(0); y < WindowHeight/TileSize; y++ {
 				drawTile(x, y, forestMap[x][y])
-
-				simulateDirectSpread(x, y)
-				simulateWind(x, y)
 			}
 		}
 	}
@@ -232,13 +272,13 @@ func toRadians(degrees int32) float64 {
 	return float64(degrees) * (math.Pi / 180)
 }
 
-func toRGB(hex string) (uint8, uint8, uint8) {
+func toRGB(hex string) Color {
 	var r, g, b uint8
 	_, err := fmt.Sscanf(hex, "#%02x%02x%02x", &r, &g, &b)
 	if err != nil {
 		panic(err)
 	}
-	return r, g, b
+	return Color{r: r, g: g, b: b}
 }
 
 func inRange(x, min, max int32) bool {
