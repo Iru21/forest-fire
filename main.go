@@ -112,6 +112,9 @@ func setupSDL(loop func()) {
 						newForest()
 					case sdl.K_t:
 						strikeThunder()
+					case sdl.K_w:
+						fullCircleWind = !fullCircleWind
+						println("Toggled full circle wind:", fullCircleWind)
 					}
 				}
 			}
@@ -223,7 +226,8 @@ func main() {
 	println("Keybinds:" +
 		"\n- Press 'Q' to quit the simulation." +
 		"\n- Press 'R' to regenerate the forest." +
-		"\n- Press 'T' to strike a thunderbolt on a random tree.")
+		"\n- Press 'T' to strike a thunderbolt on a random tree." +
+		"\n- Press 'W' to toggle full circle wind.")
 
 	newForest()
 	mainLoop := func() {
